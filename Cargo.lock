@@ -1073,20 +1073,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
-name = "subdl"
-version = "0.1.0"
-dependencies = [
- "chatgpt_rs",
- "futures-util",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1175,6 +1161,17 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
+name = "tldw"
+version = "0.1.0"
+dependencies = [
+ "chatgpt_rs",
+ "futures-util",
+ "regex",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "tokio"
