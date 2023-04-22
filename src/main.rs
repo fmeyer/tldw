@@ -10,6 +10,12 @@ use futures_util::stream::StreamExt;
 use regex::{Regex};
 use tokio;
 
+const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the following content in a \
+    structured outline format. Include any additional relevant information or insights, marking them \
+    with <a></a> to indicate that they come from an external source. Enhance the summary by \
+    incorporating pertinent quotes from the input text when necessary to clarify or support \
+    explanations.\n\n{}"];
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -53,14 +59,7 @@ async fn process_subtitles(api_key: String) -> Result<()> {
             .unwrap(),
     )?;
 
-
-    println!("processing ....");
-    let prompt = format!(
-        "summarize the following content, in a structured outline way; Also expand the outline \
-            with extra relevant knowledge but indicate with markup <a></a> so i know it comes \
-            from you, add quotes from the input when necessary to improve explanations\n\n{}",
-        cleaned_subtitles
-    );
+    let prompt = format!( "{} {}", PROMPTS[0], cleaned_subtitles);
     let stream = client
         .send_message_streaming(prompt)
         .await?;
