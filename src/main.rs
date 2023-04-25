@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io::{stdout, Write};
+use std::io::{Read, stdout, Write};
 use std::process::{Command, ExitStatus};
 use std::process::Stdio;
 
@@ -16,8 +16,15 @@ const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the 
     incorporating pertinent quotes from the input text when necessary to clarify or support \
     explanations.\n\n{}"];
 
+
+macro_rules! dprint {
+    ($($arg:tt)*) => (#[cfg(debug_assertions)] print!("DEBUG: "); println!($($arg)*));
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    dprint!("enabled");
+
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         eprintln!("Usage: {} <video_url>", args[0]);
@@ -31,9 +38,11 @@ async fn main() -> Result<()> {
     let video_url = &args[1];
     let status = download_subtitles(&video_url);
 
+    let client = build_chat_client(api_key).expect("Could not build GPT client");
+
     match status {
         Ok(_v) => {
-            process_subtitles(api_key).await?;
+            process_subtitles(client).await?;
         }
         Err(e) => {
             eprintln!("yt-dlp command failed with status: {}", e)
@@ -43,23 +52,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn process_subtitles(api_key: String) -> Result<()> {
+async fn process_subtitles(client: ChatGPT) -> Result<()> {
     let output_file = "output.en.vtt";
     let cleaned_subtitles = vtt_cleanup_pipeline(output_file);
 
     // Clean up regular file
     fs::remove_file(output_file).expect("Failed to remove subtitle file");
 
-    let client = ChatGPT::new_with_config(
-        api_key,
-        ModelConfigurationBuilder::default()
-            .temperature(0.7)
-            .engine(ChatGPTEngine::Gpt35Turbo_0301)
-            .build()
-            .unwrap(),
-    )?;
+    process_short_input(client, cleaned_subtitles).await
+}
 
-    let prompt = format!( "{} {}", PROMPTS[0], cleaned_subtitles);
+async fn process_short_input(client: ChatGPT, cleaned_subtitles: String) -> Result<()>  {
+
+    let prompt = format!("{} {}", PROMPTS[0], cleaned_subtitles);
     let stream = client
         .send_message_streaming(prompt)
         .await?;
@@ -81,10 +86,24 @@ async fn process_subtitles(api_key: String) -> Result<()> {
             }
         })
         .await;
-    return Ok(());
+    Ok(())
+}
+
+fn build_chat_client(api_key: String) -> Result<ChatGPT> {
+    let client = ChatGPT::new_with_config(
+        api_key,
+        ModelConfigurationBuilder::default()
+            .temperature(0.7)
+            .engine(ChatGPTEngine::Gpt35Turbo_0301)
+            .build()
+            .unwrap(),
+    )?;
+    Ok(client)
 }
 
 fn download_subtitles(video_url: &&String) -> std::result::Result<Option<i32>, ExitStatus> {
+    dprint!("downloading subtitle");
+
     let file = File::create("out.txt").unwrap();
 
     let stdio = Stdio::from(file);
@@ -105,6 +124,7 @@ fn download_subtitles(video_url: &&String) -> std::result::Result<Option<i32>, E
         .expect("Failed to execute yt-dlp command");
     fs::remove_file("out.txt").expect("Failed to remove output file");
     if status.success() {
+        dprint!("done");
         Ok(status.code())
     } else { Err(status) }
 }
@@ -137,6 +157,11 @@ fn vtt_cleanup_pipeline(output_file: &str) -> String {
     let output = awk.wait_with_output().expect("Failed to wait on awk command");
 
     let cleaned_text = cleanup_buffer(String::from_utf8_lossy(&output.stdout).to_string());
+
+
+    dprint!("subtitles content: {}", cleaned_text);
+    dprint!("subtitles lenght: {}", cleaned_text.len());
+
     cleaned_text
 }
 
