@@ -1,39 +1,70 @@
-use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::{stdout, Write};
 use std::process::{Command, ExitStatus};
 use std::process::Stdio;
 
+use std::collections::HashMap;
 use chatgpt::prelude::*;
 use futures_util::stream::StreamExt;
 use regex::{Regex};
 use tokio;
 
-const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the following content in a \
+const PROMPTS: [&str; 2] = ["Provide an in-depth, graduate-level summary of the following content in a \
     structured outline format. Include any additional relevant information or insights, marking them \
     with <a></a> to indicate that they come from an external source. Enhance the summary by \
     incorporating pertinent quotes from the input text when necessary to clarify or support \
-    explanations.\n\n{}"];
+    explanations.\n\n{}",
+
+    "Extract all ingredients and cooking instructions from the following text and present in a structured way \n\n{}"
+    ];
+
+use clap::{App, Arg, SubCommand};
+use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <video_url>", args[0]);
-        return Ok(());
-    }
+    let app = App::new("Video Processor")
+        .version("1.0")
+        .author("Your Name <your.email@example.com>")
+        .about("Process video subtitles")
+        .arg(
+            Arg::with_name("video_url")
+                .help("The URL of the video to process")
+                .required(true)
+                .index(1),
+        )
+        .subcommand(
+            SubCommand::with_name("summary")
+                .about("Generate a summary of the video"),
+        )
+        .subcommand(
+            SubCommand::with_name("outline")
+                .about("Generate an outline of the video"),
+        )
+        .subcommand(
+            SubCommand::with_name("recipe")
+                .about("Generate a recipe based on the video"),
+        );
 
-    let api_key =
-        env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
+    let matches = app.get_matches();
 
+    let video_url = matches.value_of("video_url").unwrap();
 
-    let video_url = &args[1];
+    let api_key = env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
+
     let status = download_subtitles(&video_url);
+
+    let mut subcommands_map = HashMap::new();
+    subcommands_map.insert("summary", "Video summary");
+    subcommands_map.insert("outline", PROMPTS[0]);
+    subcommands_map.insert("recipe", PROMPTS[1]);
 
     match status {
         Ok(_v) => {
-            process_subtitles(api_key).await?;
+            let subcommand = matches.subcommand_name().unwrap_or("outline");
+            let value = subcommands_map.get(subcommand).unwrap();
+            process_subtitles(api_key, value).await?;
         }
         Err(e) => {
             eprintln!("yt-dlp command failed with status: {}", e)
@@ -43,7 +74,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn process_subtitles(api_key: String) -> Result<()> {
+async fn process_subtitles(api_key: String, prompt: &str) -> Result<()> {
     let output_file = "output.en.vtt";
     let cleaned_subtitles = vtt_cleanup_pipeline(output_file);
 
@@ -59,7 +90,7 @@ async fn process_subtitles(api_key: String) -> Result<()> {
             .unwrap(),
     )?;
 
-    let prompt = format!( "{} {}", PROMPTS[0], cleaned_subtitles);
+    let prompt = format!( "{} {}", prompt, cleaned_subtitles);
     let stream = client
         .send_message_streaming(prompt)
         .await?;
