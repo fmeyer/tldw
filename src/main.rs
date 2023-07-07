@@ -1,14 +1,16 @@
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io::{Read, stdout, Write};
+use std::io::{stdout, Write};
 use std::process::{Command, ExitStatus};
 use std::process::Stdio;
 
 use chatgpt::prelude::*;
+use clap::Parser;
 use futures_util::stream::StreamExt;
-use regex::{Regex};
+use regex::Regex;
 use tokio;
+use log::{info, debug};
 
 const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the following content in a \
     structured outline format. Include any additional relevant information or insights, marking them \
@@ -17,32 +19,49 @@ const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the 
     explanations.\n\n{}"];
 
 
-macro_rules! dprint {
-    ($($arg:tt)*) => (#[cfg(debug_assertions)] print!("DEBUG: "); println!($($arg)*));
+#[derive(Parser, Default, Debug)]
+#[command(name = "tldw")]
+#[command(author = "Fernando Meyer <fm@pobox.com>")]
+#[command(version = "0.2.0")]
+#[command(
+    help_template = "tldw - sumarize youtube videos with ChatGPT\
+     \n {author-with-newline} {about-section}Version: {version} \n {usage-heading} {usage} \n {all-args} {tab}"
+)]
+#[command(about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    video_url: String,
+
+    #[arg(short, long, default_value_t = 4)]
+    engine: u8,
+
+    #[arg(short, long, default_value_t = 0)]
+    prompt: usize,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dprint!("enabled");
-
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <video_url>", args[0]);
-        return Ok(());
-    }
+    let args = Args::parse();
+    debug!("Debug enabled");
+    debug!("Video URL: {}", &args.video_url);
+    debug!("Engine: {}", &args.engine);
 
     let api_key =
         env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
 
+    let status = download_subtitles(args.video_url);
 
-    let video_url = &args[1];
-    let status = download_subtitles(&video_url);
+    let chat_engine = match args.engine {
+        4 => ChatGPTEngine::Gpt4,
+        _ => ChatGPTEngine::Gpt35Turbo,
+    };
 
-    let client = build_chat_client(api_key).expect("Could not build GPT client");
+    let client = build_chat_client(api_key, chat_engine).expect("Could not build GPT client");
 
     match status {
         Ok(_v) => {
-            process_subtitles(client).await?;
+            let cleaned_subtitles = process_subtitles();
+            process_short_input(client, cleaned_subtitles, args.prompt).await?
         }
         Err(e) => {
             eprintln!("yt-dlp command failed with status: {}", e)
@@ -52,19 +71,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn process_subtitles(client: ChatGPT) -> Result<()> {
+fn process_subtitles() -> String {
     let output_file = "output.en.vtt";
     let cleaned_subtitles = vtt_cleanup_pipeline(output_file);
 
     // Clean up regular file
     fs::remove_file(output_file).expect("Failed to remove subtitle file");
 
-    process_short_input(client, cleaned_subtitles).await
+    return cleaned_subtitles;
 }
 
-async fn process_short_input(client: ChatGPT, cleaned_subtitles: String) -> Result<()>  {
-
-    let prompt = format!("{} {}", PROMPTS[0], cleaned_subtitles);
+async fn process_short_input(client: ChatGPT, cleaned_subtitles: String, prompt: usize) -> Result<()> {
+    let prompt = format!("{} {}", PROMPTS[prompt], cleaned_subtitles);
     let stream = client
         .send_message_streaming(prompt)
         .await?;
@@ -89,20 +107,20 @@ async fn process_short_input(client: ChatGPT, cleaned_subtitles: String) -> Resu
     Ok(())
 }
 
-fn build_chat_client(api_key: String) -> Result<ChatGPT> {
+fn build_chat_client(api_key: String, engine: ChatGPTEngine) -> Result<ChatGPT> {
     let client = ChatGPT::new_with_config(
         api_key,
         ModelConfigurationBuilder::default()
             .temperature(0.7)
-            .engine(ChatGPTEngine::Gpt35Turbo_0301)
+            .engine(engine)
             .build()
             .unwrap(),
     )?;
     Ok(client)
 }
 
-fn download_subtitles(video_url: &&String) -> std::result::Result<Option<i32>, ExitStatus> {
-    dprint!("downloading subtitle");
+fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>, ExitStatus> {
+    debug!("downloading subtitle");
 
     let file = File::create("out.txt").unwrap();
 
@@ -117,14 +135,14 @@ fn download_subtitles(video_url: &&String) -> std::result::Result<Option<i32>, E
             "en",
             "--output",
             "output",
-            video_url,
+            &video_url,
         ])
         .stdout(stdio)
         .status()
         .expect("Failed to execute yt-dlp command");
     fs::remove_file("out.txt").expect("Failed to remove output file");
     if status.success() {
-        dprint!("done");
+        debug!("done");
         Ok(status.code())
     } else { Err(status) }
 }
@@ -159,8 +177,11 @@ fn vtt_cleanup_pipeline(output_file: &str) -> String {
     let cleaned_text = cleanup_buffer(String::from_utf8_lossy(&output.stdout).to_string());
 
 
-    dprint!("subtitles content: {}", cleaned_text);
-    dprint!("subtitles lenght: {}", cleaned_text.len());
+    debug!("subtitles content: {}", &cleaned_text);
+
+    if cleaned_text.len() >= 2 {
+        info!("Input too large: {} - it might generate wrong results", &cleaned_text.len());
+    }
 
     cleaned_text
 }
