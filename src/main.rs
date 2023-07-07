@@ -16,7 +16,11 @@ const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the 
     structured outline format. Include any additional relevant information or insights, marking them \
     with <a></a> to indicate that they come from an external source. Enhance the summary by \
     incorporating pertinent quotes from the input text when necessary to clarify or support \
-    explanations.\n\n{}"];
+    explanations. \n The output result should be in markdown format \n\n{}"];
+
+
+
+
 
 
 #[derive(Parser, Default, Debug)]
