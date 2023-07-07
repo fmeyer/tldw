@@ -5,7 +5,16 @@ Summarize YouTube videos using ChatGPT.
 
 ```
 USAGE:
-    tldw <youtube_video_url>
+
+Usage: tldw [OPTIONS] --video-url <VIDEO_URL>
+
+Options:
+  -v, --video-url <VIDEO_URL>
+  -e, --engine <ENGINE>        [default: 4]
+  -p, --prompt <PROMPT>        [default: 0]
+  -h, --help                   Print help
+  -V, --version                Print version
+
 ```
 
 ### Requirements
