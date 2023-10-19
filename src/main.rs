@@ -2,35 +2,30 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::{stdout, Write};
-use std::process::{Command, ExitStatus};
 use std::process::Stdio;
+use std::process::{Command, ExitStatus};
 
 use chatgpt::prelude::*;
 use clap::Parser;
 use futures_util::stream::StreamExt;
+use log::{debug, info};
 use regex::Regex;
 use tokio;
-use log::{info, debug};
 
-const PROMPTS: [&str; 1] = ["Provide an in-depth, graduate-level summary of the following content in a \
-    structured outline format. Include any additional relevant information or insights, marking them \
-    with <a></a> to indicate that they come from an external source. Enhance the summary by \
-    incorporating pertinent quotes from the input text when necessary to clarify or support \
-    explanations. \n The output result should be in markdown format \n\n{}"];
-
-
-
-
-
+const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following content in a \
+    structured outline. Include any additional relevant information or insight applying the concepts of smart brevety. Enhance the summary by \
+    incorporating a conclusion block when necessary to clarify or support \
+    explanations. Ignore sponsorship messages and focus on the overall idea \n The output result should be in markdown markup\n\n{}",
+    "system: I need you to create a comprehensive, detailed summary of the provided content in a clearly structured outline. Make sure to add any significant information or insights that are related to smart brevity principles. To strengthen the summary, don't hesitate to include a conclusion section if it helps in clarifying or supporting explanations. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
+    "outline. Make sure to add any significant information or insights that are related to smart brevity principles. This is a partial input, therefore don't provide introduction or conclusions unless the content mentions it. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
+    ];
 
 #[derive(Parser, Default, Debug)]
 #[command(name = "tldw")]
 #[command(author = "Fernando Meyer <fm@pobox.com>")]
-#[command(version = "0.2.0")]
-#[command(
-    help_template = "tldw - sumarize youtube videos with ChatGPT\
-     \n {author-with-newline} {about-section}Version: {version} \n {usage-heading} {usage} \n {all-args} {tab}"
-)]
+#[command(version = "0.3.0")]
+#[command(help_template = "tldw - sumarize youtube videos with ChatGPT\
+     \n {author-with-newline} {about-section}Version: {version} \n {usage-heading} {usage} \n {all-args} {tab}")]
 #[command(about, long_about = None)]
 struct Args {
     #[arg(short, long)]
@@ -39,7 +34,7 @@ struct Args {
     #[arg(short, long, default_value_t = 4)]
     engine: u8,
 
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 1)]
     prompt: usize,
 }
 
@@ -50,8 +45,7 @@ async fn main() -> Result<()> {
     debug!("Video URL: {}", &args.video_url);
     debug!("Engine: {}", &args.engine);
 
-    let api_key =
-        env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
+    let api_key = env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
 
     let status = download_subtitles(args.video_url);
 
@@ -85,11 +79,13 @@ fn process_subtitles() -> String {
     return cleaned_subtitles;
 }
 
-async fn process_short_input(client: ChatGPT, cleaned_subtitles: String, prompt: usize) -> Result<()> {
+async fn process_short_input(
+    client: ChatGPT,
+    cleaned_subtitles: String,
+    prompt: usize,
+) -> Result<()> {
     let prompt = format!("{} {}", PROMPTS[prompt], cleaned_subtitles);
-    let stream = client
-        .send_message_streaming(prompt)
-        .await?;
+    let stream = client.send_message_streaming(prompt).await?;
 
     // Iterating over stream contents
     stream
@@ -148,7 +144,9 @@ fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>, Exi
     if status.success() {
         debug!("done");
         Ok(status.code())
-    } else { Err(status) }
+    } else {
+        Err(status)
+    }
 }
 
 fn vtt_cleanup_pipeline(output_file: &str) -> String {
@@ -176,22 +174,27 @@ fn vtt_cleanup_pipeline(output_file: &str) -> String {
         .spawn()
         .expect("Failed to execute awk command");
 
-    let output = awk.wait_with_output().expect("Failed to wait on awk command");
+    let output = awk
+        .wait_with_output()
+        .expect("Failed to wait on awk command");
 
     let cleaned_text = cleanup_buffer(String::from_utf8_lossy(&output.stdout).to_string());
-
 
     debug!("subtitles content: {}", &cleaned_text);
 
     if cleaned_text.len() >= 2 {
-        info!("Input too large: {} - it might generate wrong results", &cleaned_text.len());
+        info!(
+            "Input too large: {} - it might generate wrong results",
+            &cleaned_text.len()
+        );
     }
 
     cleaned_text
 }
 
 fn cleanup_buffer(text: String) -> String {
-    let timestamp_regex = Regex::new(r"(\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\n)").unwrap();
+    let timestamp_regex =
+        Regex::new(r"(\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\n)").unwrap();
     let cleaned_text = timestamp_regex.replace_all(text.as_str(), "");
     let nbsp_regex = Regex::new(r"&nbsp;").unwrap();
     let cleaned_text = nbsp_regex.replace_all(&cleaned_text, " ");
