@@ -12,13 +12,12 @@ use log::{debug, info};
 use regex::Regex;
 use tokio;
 
-const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following content in a \
-    structured outline. Include any additional relevant information or insight applying the concepts of smart brevety. Enhance the summary by \
-    incorporating a conclusion block when necessary to clarify or support \
-    explanations. Ignore sponsorship messages and focus on the overall idea \n The output result should be in markdown markup\n\n{}",
+const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following content in a structured outline. Include any additional relevant information or insight applying the concepts of smart brevety. Enhance the summary by incorporating a conclusion block when necessary to clarify or support explanations. Ignore sponsorship messages and focus on the overall idea \n The output result should be in markdown markup\n",
     "system: I need you to create a comprehensive, detailed summary of the provided content in a clearly structured outline. Make sure to add any significant information or insights that are related to smart brevity principles. To strengthen the summary, don't hesitate to include a conclusion section if it helps in clarifying or supporting explanations. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
-    "outline. Make sure to add any significant information or insights that are related to smart brevity principles. This is a partial input, therefore don't provide introduction or conclusions unless the content mentions it. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
+    "system: I need you to create a comprehensive, detailed summary of the provided content in a clearly structured outline. This is a partial input, therefore don't provide introduction or conclusions unless the content mentions it. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
     ];
+
+const MAX_TOKENS: usize = 15000;
 
 #[derive(Parser, Default, Debug)]
 #[command(name = "tldw")]
@@ -59,7 +58,13 @@ async fn main() -> Result<()> {
     match status {
         Ok(_v) => {
             let cleaned_subtitles = process_subtitles();
-            process_short_input(client, cleaned_subtitles, args.prompt).await?
+
+            if cleaned_subtitles.len() > MAX_TOKENS {
+                process_long_input(client, cleaned_subtitles, 2).await?
+            } else {
+                process_short_input(client, cleaned_subtitles, args.prompt).await?
+            }
+
         }
         Err(e) => {
             eprintln!("yt-dlp command failed with status: {}", e)
@@ -79,14 +84,8 @@ fn process_subtitles() -> String {
     return cleaned_subtitles;
 }
 
-async fn process_short_input(
-    client: ChatGPT,
-    cleaned_subtitles: String,
-    prompt: usize,
-) -> Result<()> {
-    let prompt = format!("{} {}", PROMPTS[prompt], cleaned_subtitles);
+async fn process_message_stream(client: ChatGPT, prompt: &str) -> Result<()> {
     let stream = client.send_message_streaming(prompt).await?;
-
     // Iterating over stream contents
     stream
         .for_each(|each| async move {
@@ -104,6 +103,47 @@ async fn process_short_input(
             }
         })
         .await;
+    Ok(())
+}
+
+
+async fn process_long_input(
+    client: ChatGPT,
+    cleaned_subtitles: String,
+    prompt: usize,
+) -> Result<()> {
+
+    let mut chunks: Vec<String> = Vec::new();
+
+    // split subtitles in chunks of 15000 characters
+    for chunk in cleaned_subtitles.as_bytes().chunks(MAX_TOKENS) {
+        chunks.push(String::from_utf8(chunk.to_vec()).unwrap());
+    }
+
+
+    for chunk in chunks.iter() {
+        // create a new conversation and client instance for each chunk
+        let  new_client = client.clone();
+        let mut prompt = PROMPTS[prompt].to_string();
+
+        // append chunk to prompt
+        prompt.push_str(chunk);
+
+        process_message_stream(new_client, &prompt).await?;
+    }
+
+    Ok(())
+}
+
+async fn process_short_input(
+    client: ChatGPT,
+    cleaned_subtitles: String,
+    prompt: usize,
+) -> Result<()> {
+    let prompt = format!("{} {}", PROMPTS[prompt], cleaned_subtitles);
+
+    process_message_stream(client, &prompt).await?;
+
     Ok(())
 }
 
