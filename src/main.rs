@@ -33,6 +33,8 @@ async fn main() -> Result<()> {
     debug!("Video URL: {}", &args.video_url);
     debug!("Engine: {}", &args.engine);
 
+
+
     let api_key = env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
 
     let status = processing::download_subtitles(args.video_url);

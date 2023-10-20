@@ -8,7 +8,7 @@ use regex::Regex;
 //TODO(fm): use a temp folder to store the output file, keep a copy of the original file in somewhere to avoid downloading it again
 
 pub fn process_subtitles() -> String {
-    let output_file = "output.en.vtt";
+    let output_file = "/tmp/output.en.vtt";
     let cleaned_subtitles = vtt_cleanup_pipeline(output_file);
 
     // Clean up regular file
@@ -20,7 +20,7 @@ pub fn process_subtitles() -> String {
 pub fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>, ExitStatus> {
     debug!("downloading subtitle");
 
-    let file = File::create("out.txt").unwrap();
+    let file = File::create("/tmp/out.txt").unwrap();
 
     let stdio = Stdio::from(file);
 
@@ -32,13 +32,13 @@ pub fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>,
             "--sub-lang",
             "en",
             "--output",
-            "output",
+            "/tmp/output", //TODO(fm): replace with videoID
             &video_url,
         ])
         .stdout(stdio)
         .status()
         .expect("Failed to execute yt-dlp command");
-    fs::remove_file("out.txt").expect("Failed to remove output file");
+    fs::remove_file("/tmp/out.txt").expect("Failed to remove output file");
     if status.success() {
         debug!("done");
         Ok(status.code())

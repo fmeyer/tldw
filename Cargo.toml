@@ -1,6 +1,6 @@
 [package]
 name = "tldw"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Fernando Meyer <fm@pobox.com>"]
 edition = "2021"
 
