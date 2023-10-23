@@ -1,15 +1,15 @@
-use std::fs;
-use std::process::{Command, ExitStatus, Stdio};
 use log::{debug, info};
-use std::fs::File;
 use regex::Regex;
-
+use std::fs;
+use std::fs::File;
+use std::process::{Command, ExitStatus, Stdio};
+use std::collections::HashSet;
+use std::io::{self, BufRead, BufReader};
 
 //TODO(fm): use a temp folder to store the output file, keep a copy of the original file in somewhere to avoid downloading it again
-
 pub fn process_subtitles() -> String {
     let output_file = "/tmp/output.en.vtt";
-    let cleaned_subtitles = vtt_cleanup_pipeline(output_file);
+    let cleaned_subtitles = process_file(output_file);
 
     // Clean up regular file
     fs::remove_file(output_file).expect("Failed to remove subtitle file");
@@ -47,49 +47,27 @@ pub fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>,
     }
 }
 
-//TODO(fm): Replace this with proper text processing
-//TODO(fm): Atempt to fix paragraphs that are broken in the middle of a sentence
-fn vtt_cleanup_pipeline(output_file: &str) -> String {
-    // cat command
-    let cat = Command::new("cat")
-        .arg(output_file)
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute cat command");
+fn process_file(filename: &str) -> String  {
+    let file = File::open(filename).expect("Failed to open file");
+    let reader = BufReader::new(file);
 
-    // grep command
-    let grep = Command::new("grep")
-        .arg("-v")
-        .arg(":")
-        .stdin(cat.stdout.unwrap())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute grep command");
+    let mut seen = HashSet::new();
+    let mut buffer = Vec::new();
 
-    // awk command
-    let awk = Command::new("awk")
-        .arg("!seen[$0]++")
-        .stdin(grep.stdout.unwrap())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute awk command");
+    for line in reader.lines() {
+        let line = line.unwrap();
+        let cleaned_line = cleanup_buffer(line);
+        if cleaned_line.contains(":") {
+            continue;
+        }
 
-    let output = awk
-        .wait_with_output()
-        .expect("Failed to wait on awk command");
-
-    let cleaned_text = cleanup_buffer(String::from_utf8_lossy(&output.stdout).to_string());
-
-    debug!("subtitles content: {}", &cleaned_text);
-
-    if cleaned_text.len() >= 2 {
-        info!(
-            "Input too large: {} - it might generate wrong results",
-            &cleaned_text.len()
-        );
+        if !seen.contains(&cleaned_line) {
+            buffer.push(cleaned_line.clone());
+            seen.insert(cleaned_line);
+        }
     }
-
-    cleaned_text
+    let combined_string = buffer.join("\n");
+    return combined_string;
 }
 
 fn cleanup_buffer(text: String) -> String {
