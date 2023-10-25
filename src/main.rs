@@ -2,9 +2,13 @@ mod processing;
 mod summarizer;
 
 use chatgpt::prelude::*;
+use chrono::prelude::*;
 use clap::Parser;
 use log::debug;
+use regex::Regex;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use summarizer::MAX_TOKENS;
 use tokio;
 
@@ -26,6 +30,25 @@ struct Args {
     prompt: usize,
 }
 
+fn extract_video_id(url: &str) -> Option<&str> {
+    let re = Regex::new(r"(?i)[/|=]([\w-]{11})").unwrap();
+    re.captures(url)
+        .and_then(|cap| cap.get(1).map(|m| m.as_str()))
+}
+
+fn generate_filename(video_id: &str) -> String {
+    let now = Utc::now();
+    let date_str = now.format("%Y%m%d").to_string();
+    let unix_timestamp = now.timestamp();
+    format!("{}_{}_{}.md", date_str, video_id, unix_timestamp)
+}
+
+fn write_to_file(filename: &str, content: &str) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    file.write_all(content.as_bytes())?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -35,7 +58,7 @@ async fn main() -> Result<()> {
 
     let api_key = env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
 
-    let status = processing::download_subtitles(args.video_url);
+    let status = processing::download_subtitles(&args.video_url);
 
     let chat_engine = match args.engine {
         4 => ChatGPTEngine::Gpt4,
@@ -45,7 +68,7 @@ async fn main() -> Result<()> {
     let gpt_client =
         summarizer::build_chat_client(api_key, chat_engine).expect("Could not build GPT client");
 
-    match status {
+    let result: String = match status {
         Ok(_v) => {
             let input = processing::process_subtitles();
 
@@ -56,9 +79,13 @@ async fn main() -> Result<()> {
             }
         }
         Err(e) => {
-            eprintln!("yt-dlp command failed with status: {}", e)
+            format!("yt-dlp command failed with status: {}", e)
         }
     };
+
+    let video_id = extract_video_id(&args.video_url);
+    let filename = generate_filename(video_id.unwrap());
+    write_to_file(&filename, &result).expect("Failed to write to the file");
 
     Ok(())
 }

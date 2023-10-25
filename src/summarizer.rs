@@ -4,6 +4,9 @@ use chatgpt::prelude::ModelConfigurationBuilder;
 use chatgpt::prelude::ResponseChunk;
 use futures_util::stream::StreamExt;
 use std::io::{stdout, Write};
+use std::sync::{Arc, Mutex};
+
+
 
 //TODO(fm): better prompt structure
 const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following content in a structured outline. Include any additional relevant information or insight applying the concepts of smart brevity. Enhance the summary by incorporating a conclusion block when necessary to clarify or support explanations. Ignore sponsorship messages and focus on the overall idea \n The output result should be in markdown markup\n",
@@ -13,34 +16,55 @@ const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following conte
 
 pub const MAX_TOKENS: usize = 15000;
 
-async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Result<()> {
+async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Result<String> {
     let stream = client.send_message_streaming(prompt).await?;
+
+    // Wrapping the buffer in an Arc and Mutex
+    let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
+
     // Iterating over stream contents
     stream
-        .for_each(|each| async move {
-            match each {
-                ResponseChunk::Content {
-                    delta,
-                    response_index: _,
-                } => {
-                    // Printing part of response without the newline
-                    print!("{delta}");
-                    // Manually flushing the standard output, as `print` macro does not do that
-                    stdout().lock().flush().unwrap();
+        .for_each({
+            // Cloning the Arc to be moved into the outer move closure
+            let buffer = Arc::clone(&buffer);
+            move |each| {
+                // Cloning the Arc again to be moved into the async block
+                let buffer_clone = Arc::clone(&buffer);
+                async move {
+                    match each {
+                        ResponseChunk::Content {
+                            delta,
+                            response_index: _,
+                        } => {
+                            // Printing part of response without the newline
+                            // print!("{delta}");
+                            print!(".");
+                            // Manually flushing the standard output, as `print` macro does not do that
+                            stdout().lock().flush().unwrap();
+                            // Appending delta to buffer
+                            let mut locked_buffer = buffer_clone.lock().unwrap();
+                            locked_buffer.push(delta);
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
             }
         })
         .await;
-    Ok(())
+
+    // Use buffer outside of for_each, by locking and dereferencing
+    let final_buffer = buffer.lock().unwrap();
+
+    Ok(final_buffer.join(""))
 }
 
 pub async fn process_long_input(
     gpt_client: ChatGPT,
     input: String,
     prompt: usize,
-) -> chatgpt::Result<()> {
+) -> chatgpt::Result<String> {
     let mut chunks: Vec<String> = Vec::new();
+    let mut buffer = String::new();
 
     // split subtitles in chunks of 15000 characters
     for chunk in input.as_bytes().chunks(MAX_TOKENS) {
@@ -55,22 +79,23 @@ pub async fn process_long_input(
 
         // append chunk to prompt
         prompt.push_str(chunk);
-        process_message_stream(new_client, &prompt).await?;
+        let result = process_message_stream(new_client, &prompt).await?;
+        buffer.push_str(&result);
     }
 
-    Ok(())
+    Ok(buffer)
 }
 
 pub async fn process_short_input(
     gpt_client: ChatGPT,
     input: String,
     prompt: usize,
-) -> chatgpt::Result<()> {
+) -> chatgpt::Result<String> {
     let prompt = format!("{} {}", PROMPTS[prompt], input);
 
-    process_message_stream(gpt_client, &prompt).await?;
+    let result = process_message_stream(gpt_client, &prompt).await?;
 
-    Ok(())
+    Ok(result)
 }
 
 pub fn build_chat_client(api_key: String, engine: ChatGPTEngine) -> chatgpt::Result<ChatGPT> {

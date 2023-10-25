@@ -1,10 +1,10 @@
-use log::{debug, info};
+use log::debug;
 use regex::Regex;
 use std::fs;
 use std::fs::File;
 use std::process::{Command, ExitStatus, Stdio};
 use std::collections::HashSet;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 
 //TODO(fm): use a temp folder to store the output file, keep a copy of the original file in somewhere to avoid downloading it again
 pub fn process_subtitles() -> String {
@@ -17,7 +17,7 @@ pub fn process_subtitles() -> String {
     return cleaned_subtitles;
 }
 
-pub fn download_subtitles(video_url: String) -> std::result::Result<Option<i32>, ExitStatus> {
+pub fn download_subtitles(video_url: &String) -> std::result::Result<Option<i32>, ExitStatus> {
     debug!("downloading subtitle");
 
     let file = File::create("/tmp/out.txt").unwrap();

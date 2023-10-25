@@ -1237,7 +1237,9 @@ name = "tldw"
 version = "0.3.2"
 dependencies = [
  "chatgpt_rs",
+ "chrono",
  "clap",
+ "futures",
  "futures-util",
  "log",
  "regex",
