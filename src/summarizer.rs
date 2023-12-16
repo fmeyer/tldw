@@ -6,9 +6,7 @@ use futures_util::stream::StreamExt;
 use std::io::{stdout, Write};
 use std::sync::{Arc, Mutex};
 
-
-
-//TODO(fm): better prompt structure
+//TODO(fm): Auto load prompts from somewhere
 const PROMPTS: [&str; 3] = ["Provide an in-depth, summary of the following content in a structured outline. Include any additional relevant information or insight applying the concepts of smart brevity. Enhance the summary by incorporating a conclusion block when necessary to clarify or support explanations. Ignore sponsorship messages and focus on the overall idea \n The output result should be in markdown markup\n",
     "system: I need you to create a comprehensive, detailed summary of the provided content in a clearly structured outline. Make sure to add any significant information or insights that are related to smart brevity principles. To strengthen the summary, don't hesitate to include a conclusion section if it helps in clarifying or supporting explanations. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format.",
     "system: I need you to create a comprehensive, detailed summary of the provided content in a clearly structured outline. This is a partial input, therefore don't provide introduction or conclusions unless the content mentions it. Please specifically omit any messages pertaining to sponsorship, and prioritize the overarching idea. The finalized product should be delivered in markdown format with top level topics as headers and subtopics as items in a list. Don't use enumerations.",
@@ -76,6 +74,9 @@ pub async fn process_long_input(
         // create a new conversation and client instance for each chunk
         let new_client = gpt_client.clone();
         let mut prompt = PROMPTS[prompt].to_string();
+
+        // print chunk because I can't wait
+        print!("{}", chunk);
 
         // append chunk to prompt
         prompt.push_str(chunk);
