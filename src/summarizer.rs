@@ -35,8 +35,8 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
                             response_index: _,
                         } => {
                             // Printing part of response without the newline
-                            // print!("{delta}");
-                            print!(".");
+                            print!("{delta}");
+                            // print!(".");
                             // Manually flushing the standard output, as `print` macro does not do that
                             stdout().lock().flush().unwrap();
                             // Appending delta to buffer
@@ -74,10 +74,6 @@ pub async fn process_long_input(
         // create a new conversation and client instance for each chunk
         let new_client = gpt_client.clone();
         let mut prompt = PROMPTS[prompt].to_string();
-
-        // print chunk because I can't wait
-        print!("{}", chunk);
-
         // append chunk to prompt
         prompt.push_str(chunk);
         let result = process_message_stream(new_client, &prompt).await?;

@@ -1,10 +1,10 @@
 use log::debug;
 use regex::Regex;
+use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
-use std::process::{Command, ExitStatus, Stdio};
-use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
+use std::process::{Command, ExitStatus, Stdio};
 
 //TODO(fm): use a temp folder to store the output file, keep a copy of the original file in somewhere to avoid downloading it again
 pub fn process_subtitles() -> String {
@@ -47,7 +47,7 @@ pub fn download_subtitles(video_url: &String) -> std::result::Result<Option<i32>
     }
 }
 
-fn process_file(filename: &str) -> String  {
+fn process_file(filename: &str) -> String {
     let file = File::open(filename).expect("Failed to open file");
     let reader = BufReader::new(file);
 
