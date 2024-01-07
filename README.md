@@ -32,6 +32,7 @@ Options:
 ### Overview 
 
 ```mermaid
+%%{ init : { "theme" : "forest", "flowchart" : { "curve" : "stepBefore" }}}%%
 graph TD
     A[Get YouTube URL] --> B[Attempt to download subtitle]
     B -->|Fail| C[Attempt to download auto-generated subtitle]
