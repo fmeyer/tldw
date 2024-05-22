@@ -30,6 +30,8 @@ const PROMPTS: [&str; 3] = [
 	 list. Don't use enumerations.",
 ];
 
+// FIXME: this is a temporary solution, I should replace it with proper
+// tokenization
 pub const MAX_TOKENS: usize = 15000;
 
 async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Result<String> {

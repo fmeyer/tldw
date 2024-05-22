@@ -13,7 +13,7 @@ use tokio;
 #[derive(Parser, Default, Debug)]
 #[command(name = "tldw")]
 #[command(author = "Fernando Meyer <fm@pobox.com>")]
-#[command(version = "0.3.0")]
+#[command(version = "0.4.0")]
 #[command(help_template = "tldw - summarize youtube videos with ChatGPT\n {author-with-newline} \
                            {about-section}Version: {version} \n {usage-heading} {usage} \n \
                            {all-args} {tab}")]
@@ -59,8 +59,8 @@ async fn main() -> Result<()> {
 	let status = processing::download_subtitles(&args.video_url);
 
 	let chat_engine = match args.engine {
-		4 => ChatGPTEngine::Gpt4,
-		_ => ChatGPTEngine::Gpt35Turbo,
+		4 => ChatGPTEngine::Custom("gpt-4o-2024-05-13"),
+		_ => ChatGPTEngine::Gpt4,
 	};
 
 	let gpt_client =
