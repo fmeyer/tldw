@@ -3,3 +3,4 @@
 .idea
 .direnv/
 flake.lock
+20*.md

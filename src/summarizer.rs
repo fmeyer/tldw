@@ -16,13 +16,13 @@ const PROMPTS: [&str; 3] = [
 	 the summary by incorporating a conclusion block when necessary to clarify or support \
 	 explanations. Ignore sponsorship messages and focus on the overall idea \n The output result \
 	 should be in markdown markup\n",
-	"system: I need you to create a comprehensive, detailed summary of the provided content in a \
+	"I need you to create a comprehensive, detailed summary of the provided content in a \
 	 clearly structured outline. Make sure to add any significant information or insights that \
 	 are related to smart brevity principles. To strengthen the summary, don't hesitate to \
 	 include a conclusion section if it helps in clarifying or supporting explanations. Please \
 	 specifically omit any messages pertaining to sponsorship, and prioritize the overarching \
 	 idea. The finalized product should be delivered in markdown format.",
-	"system: I need you to create a comprehensive, detailed summary of the provided content in a \
+	"I need you to create a comprehensive, detailed summary of the provided content in a \
 	 clearly structured outline. This is a partial input, therefore don't provide introduction or \
 	 conclusions unless the content mentions it. Please specifically omit any messages pertaining \
 	 to sponsorship, and prioritize the overarching idea. The finalized product should be \
@@ -48,6 +48,7 @@ async fn process_message_stream(
 	let request = CreateChatCompletionRequestArgs::default()
 		.model(model)
 		.messages([ChatCompletionRequestUserMessageArgs::default().content(prompt).build()?.into()])
+		.temperature(0.7)
 		.build()?;
 
 	let stream = match client.chat().create_stream(request).await {
@@ -174,4 +175,38 @@ pub fn build_chat_client(
 	let config = OpenAIConfig::new().with_api_key(api_key);
 	let client = Client::with_config(config);
 	Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_build_chat_client() {
+		let api_key = "test-key".to_string();
+		let result = build_chat_client(api_key);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_chunking() {
+		let input = "a".repeat(MAX_TOKENS * 2);
+		let chunks: Vec<String> = input
+			.as_bytes()
+			.chunks(MAX_TOKENS)
+			.map(|chunk| String::from_utf8(chunk.to_vec()).unwrap())
+			.collect();
+
+		assert_eq!(chunks.len(), 2);
+		assert_eq!(chunks[0].len(), MAX_TOKENS);
+		assert_eq!(chunks[1].len(), MAX_TOKENS);
+	}
+
+	#[test]
+	fn test_prompts() {
+		assert_eq!(PROMPTS.len(), 3);
+		assert!(!PROMPTS[0].is_empty());
+		assert!(!PROMPTS[1].is_empty());
+		assert!(!PROMPTS[2].is_empty());
+	}
 }

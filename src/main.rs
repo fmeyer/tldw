@@ -59,7 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let subtitle_result = processing::download_subtitles(&args.video_url);
 
 	let model = match args.engine {
-		4 => "gpt-4o-2024-05-13",
+		4 => "gpt-4o-mini-2024-07-18",
+		3 => "gpt-4-turbo-2024-04-09",
+		2 => "gpt-3.5-turbo-0125",
+		1 => "gpt-4o-2024-05-13",
 		_ => "gpt-4",
 	};
 
@@ -142,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	let video_id = extract_video_id(&args.video_url);
-	let filename = generate_filename(video_id.unwrap());
+	let filename = generate_filename(video_id.unwrap_or("unknown"));
 	debug!("Writing result to file: {}", filename);
 	debug!("Final result length: {}", result.len());
 	debug!("Result preview (first 200 chars): {}", result.chars().take(200).collect::<String>());

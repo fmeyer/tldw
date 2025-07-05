@@ -1,7 +1,6 @@
 # TL;DW (Too Long; Didn't Watch)
 
-
-Summarize YouTube videos using ChatGPT.
+Summarize YouTube videos using OpenAI's ChatGPT with intelligent two-phase processing for high-quality, structured summaries.
 
 ```
 USAGE:
@@ -18,34 +17,76 @@ Options:
 ```
 
 ### Requirements
-- An environment variable named `OPENAI_API_KEY` must be defined, containing an [OpenAI API secret key](ttps://platform.openai.com/account/api-keys).
+- An environment variable named `OPENAI_API_KEY` must be defined, containing an [OpenAI API secret key](https://platform.openai.com/account/api-keys).
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) must be installed and available in your system's PATH.
+
+### Features
+- **Two-Phase Processing**: Uses Map-Reduce pattern for better context preservation
+- **Structured Output**: Generates both bullet points and narrative summaries
+- **Cost-Efficient**: Smart model selection (GPT-3.5 for extraction, GPT-4 for synthesis)
+- **Cost Control**: Built-in cost estimation and optional spending limits
+- **Semantic Chunking**: Intelligent content splitting that preserves meaning
+- **Quality Focus**: Prioritizes summary quality over real-time streaming
 
 ### Limitations
 
-- Due to API restrictions, you may exhaust your token limit before receiving a complete summary.
 - Videos without subtitles cannot be processed.
 - The quality of summaries based on auto-generated subtitles may vary.
 - Results default to English, even if the input language is different.
+- Processing time is longer than simple chunking (but produces much better results).
+- Requires sufficient OpenAI API quota for two-phase processing.
 
 
-### Overview 
+### Architecture: Two-Phase Processing
 
 ```mermaid
 %%{ init : { "theme" : "forest", "flowchart" : { "curve" : "stepBefore" }}}%%
 graph TD
-    A[Get YouTube URL] --> B[Attempt to download subtitle]
-    B -->|Fail| C[Attempt to download auto-generated subtitle]
-    B -->|Success| D[Process subtitles]
-    C -->|Fail| E[Abort process]
-    C -->|Success| D[Process subtitles]
-    D --> F[Clean subtitles by removing timestamps, duplicates, and escape characters]
-    F --> G[Check if prompt length > 1000 tokens]
-    G -->|Yes| H[Split prompt into n chunks]
-    H --> I[Submit each chunk to ChatGPT, append each output and process until all chuncks are done]
-    G -->|No| J[Submit entire prompt to ChatGPT and wait for completion]
-    I --> K[Combine and process ChatGPT responses]
-    J --> K[Process ChatGPT response]
-    K --> L[Print results]
+    A[Get YouTube URL] --> B[Download subtitles via yt-dlp]
+    B --> C[Clean and process subtitles]
+    C --> D[Estimate cost and check limits]
+    D --> E[Phase 1: Extract key information]
+    E --> F[Create semantic chunks]
+    F --> G[Extract themes, points, quotes using GPT-3.5]
+    G --> H[Combine extracted content]
+    H --> I[Phase 2: Synthesize summary]
+    I --> J[Generate structured output using GPT-4]
+    J --> K[Format as markdown with bullets + narrative]
+    K --> L[Save structured summary]
 ```
+
+### Output Format
+
+The tool generates structured summaries with:
+
+```markdown
+# Video Title
+
+## Key Themes
+- **Theme 1**: Brief description
+- **Theme 2**: Brief description
+
+## Detailed Points
+### Theme 1
+- Key point 1
+- Key point 2
+
+### Theme 2
+- Key point 1
+- Key point 2
+
+## Narrative Summary
+[Coherent narrative connecting all themes with logical flow]
+
+## Key Quotes & Insights
+- "Important quote 1"
+- "Important quote 2"
+```
+
+### Cost Management
+
+- **Smart Model Selection**: Uses GPT-3.5-turbo for extraction (cheaper) and GPT-4 for synthesis (better quality)
+- **Cost Estimation**: Shows estimated cost before processing
+- **Spending Limits**: Built-in $5 default limit (configurable)
+- **Linear Scaling**: Cost scales linearly with content size, not exponentially
 
