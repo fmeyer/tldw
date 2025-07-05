@@ -1,9 +1,9 @@
-use chatgpt::{
-	client::ChatGPT,
-	config::ChatGPTEngine,
-	prelude::{ModelConfigurationBuilder, ResponseChunk},
+use async_openai::{
+	config::OpenAIConfig,
+	types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs},
+	Client,
 };
-use futures_util::stream::StreamExt;
+use futures::StreamExt;
 use std::{
 	io::{stdout, Write},
 	sync::{Arc, Mutex},
@@ -34,14 +34,23 @@ const PROMPTS: [&str; 3] = [
 // tokenization
 pub const MAX_TOKENS: usize = 15000;
 
-async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Result<String> {
+async fn process_message_stream(
+	client: Client<OpenAIConfig>,
+	prompt: &str,
+	model: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
 	log::debug!("Sending message to OpenAI API, prompt length: {}", prompt.len());
 	log::debug!(
 		"Prompt preview (first 500 chars): {}",
 		prompt.chars().take(500).collect::<String>()
 	);
 
-	let stream = match client.send_message_streaming(prompt).await {
+	let request = CreateChatCompletionRequestArgs::default()
+		.model(model)
+		.messages([ChatCompletionRequestUserMessageArgs::default().content(prompt).build()?.into()])
+		.build()?;
+
+	let stream = match client.chat().create_stream(request).await {
 		Ok(stream) => {
 			log::debug!("Successfully created OpenAI stream");
 			stream
@@ -52,15 +61,15 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
 				|| error_msg.contains("exceeded your current quota")
 			{
 				log::error!("OpenAI API quota exceeded. Please check your billing at https://platform.openai.com/account/billing");
-				return Err(e);
+				return Err(Box::new(e));
 			} else if error_msg.contains("invalid_api_key")
 				|| error_msg.contains("Incorrect API key")
 			{
 				log::error!("Invalid OpenAI API key. Please check your API key at https://platform.openai.com/account/api-keys");
-				return Err(e);
+				return Err(Box::new(e));
 			} else {
 				log::error!("Failed to create OpenAI stream: {}", e);
-				return Err(e);
+				return Err(Box::new(e));
 			}
 		},
 	};
@@ -70,45 +79,37 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
 	let chunk_count = Arc::new(Mutex::new(0));
 
 	// Iterating over stream contents
-	stream
-		.for_each({
-			// Cloning the Arc to be moved into the outer move closure
-			let buffer = Arc::clone(&buffer);
-			let chunk_count = Arc::clone(&chunk_count);
-			move |each| {
-				// Cloning the Arc again to be moved into the async block
-				let buffer_clone = Arc::clone(&buffer);
-				let chunk_count_clone = Arc::clone(&chunk_count);
-				async move {
-					match each {
-						ResponseChunk::Content { delta, response_index: _ } => {
-							// Printing part of response without the newline
-							print!("{delta}");
-							// print!(".");
-							// Manually flushing the standard output, as `print` macro does not do
-							// that
-							stdout().lock().flush().unwrap();
-							// Appending delta to buffer
-							let mut locked_buffer = buffer_clone.lock().unwrap();
-							locked_buffer.push(delta);
+	let mut stream = stream;
+	while let Some(result) = stream.next().await {
+		match result {
+			Ok(response) => {
+				for choice in response.choices {
+					if let Some(content) = choice.delta.content {
+						// Printing part of response without the newline
+						print!("{}", content);
+						// Manually flushing the standard output, as `print` macro does not do that
+						stdout().lock().flush().unwrap();
 
-							// Track chunk count
-							let mut count = chunk_count_clone.lock().unwrap();
-							*count += 1;
-						},
-						ResponseChunk::Done => {
-							log::debug!("OpenAI stream completed");
-						},
-						_ => {
-							log::debug!("Received other response chunk type");
-						},
+						// Appending delta to buffer
+						let mut locked_buffer = buffer.lock().unwrap();
+						locked_buffer.push(content);
+
+						// Track chunk count
+						let mut count = chunk_count.lock().unwrap();
+						*count += 1;
 					}
 				}
-			}
-		})
-		.await;
+			},
+			Err(e) => {
+				log::error!("Error in stream: {}", e);
+				return Err(Box::new(e));
+			},
+		}
+	}
 
-	// Use buffer outside of for_each, by locking and dereferencing
+	log::debug!("OpenAI stream completed");
+
+	// Use buffer outside of stream processing
 	let final_buffer = buffer.lock().unwrap();
 	let final_chunk_count = chunk_count.lock().unwrap();
 	let result = final_buffer.join("");
@@ -127,10 +128,11 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
 }
 
 pub async fn process_long_input(
-	gpt_client: ChatGPT,
+	gpt_client: Client<OpenAIConfig>,
 	input: String,
 	prompt: usize,
-) -> chatgpt::Result<String> {
+	model: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
 	let mut chunks: Vec<String> = Vec::new();
 	let mut buffer = String::new();
 
@@ -141,12 +143,12 @@ pub async fn process_long_input(
 
 	//TODO(fm): Check if context is kept between loop iterations
 	for chunk in chunks.iter() {
-		// create a new conversation and client instance for each chunk
+		// create a new client instance for each chunk (client is cheaply cloneable)
 		let new_client = gpt_client.clone();
 		let mut prompt_text = PROMPTS[prompt].to_string();
 		// append chunk to prompt
 		prompt_text.push_str(chunk);
-		let result = process_message_stream(new_client, &prompt_text).await?;
+		let result = process_message_stream(new_client, &prompt_text, model).await?;
 		buffer.push_str(&result);
 	}
 
@@ -154,25 +156,22 @@ pub async fn process_long_input(
 }
 
 pub async fn process_short_input(
-	gpt_client: ChatGPT,
+	gpt_client: Client<OpenAIConfig>,
 	input: String,
 	prompt: usize,
-) -> chatgpt::Result<String> {
+	model: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
 	let prompt_text = format!("{} {}", PROMPTS[prompt], input);
 
-	let result = process_message_stream(gpt_client, &prompt_text).await?;
+	let result = process_message_stream(gpt_client, &prompt_text, model).await?;
 
 	Ok(result)
 }
 
-pub fn build_chat_client(api_key: String, engine: ChatGPTEngine) -> chatgpt::Result<ChatGPT> {
-	let client = ChatGPT::new_with_config(
-		api_key,
-		ModelConfigurationBuilder::default()
-			.temperature(0.7)
-			.engine(engine)
-			.build()
-			.unwrap(),
-	)?;
+pub fn build_chat_client(
+	api_key: String,
+) -> Result<Client<OpenAIConfig>, Box<dyn std::error::Error + Send + Sync>> {
+	let config = OpenAIConfig::new().with_api_key(api_key);
+	let client = Client::with_config(config);
 	Ok(client)
 }

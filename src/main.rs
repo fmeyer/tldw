@@ -1,7 +1,6 @@
 mod processing;
 mod summarizer;
 
-use chatgpt::prelude::*;
 use chrono::prelude::*;
 use clap::Parser;
 use log::debug;
@@ -48,7 +47,7 @@ fn write_to_file(filename: &str, content: &str) -> std::io::Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	env_logger::init();
 	let args = Args::parse();
 	debug!("Debug enabled");
@@ -59,13 +58,13 @@ async fn main() -> Result<()> {
 
 	let subtitle_result = processing::download_subtitles(&args.video_url);
 
-	let chat_engine = match args.engine {
-		4 => ChatGPTEngine::Custom("gpt-4o-2024-05-13"),
-		_ => ChatGPTEngine::Gpt4,
+	let model = match args.engine {
+		4 => "gpt-4o-2024-05-13",
+		_ => "gpt-4",
 	};
 
-	let gpt_client = summarizer::build_chat_client(api_key.clone(), chat_engine)
-		.expect("Could not build GPT client");
+	let gpt_client =
+		summarizer::build_chat_client(api_key.clone()).expect("Could not build GPT client");
 
 	let result: String = match subtitle_result {
 		Ok(subtitle_file_path) => {
@@ -80,7 +79,7 @@ async fn main() -> Result<()> {
 					"Processing long input with {} chunks",
 					(input.len() + MAX_TOKENS - 1) / MAX_TOKENS
 				);
-				match summarizer::process_long_input(gpt_client, input, 2).await {
+				match summarizer::process_long_input(gpt_client, input, 2, model).await {
 					Ok(result) => {
 						debug!("Long input processing complete. Result length: {}", result.len());
 						if result.is_empty() {
@@ -108,7 +107,7 @@ async fn main() -> Result<()> {
 				}
 			} else {
 				debug!("Processing short input");
-				match summarizer::process_short_input(gpt_client, input, args.prompt).await {
+				match summarizer::process_short_input(gpt_client, input, args.prompt, model).await {
 					Ok(result) => {
 						debug!("Short input processing complete. Result length: {}", result.len());
 						if result.is_empty() {
