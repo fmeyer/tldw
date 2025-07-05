@@ -35,19 +35,50 @@ const PROMPTS: [&str; 3] = [
 pub const MAX_TOKENS: usize = 15000;
 
 async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Result<String> {
-	let stream = client.send_message_streaming(prompt).await?;
+	log::debug!("Sending message to OpenAI API, prompt length: {}", prompt.len());
+	log::debug!(
+		"Prompt preview (first 500 chars): {}",
+		prompt.chars().take(500).collect::<String>()
+	);
+
+	let stream = match client.send_message_streaming(prompt).await {
+		Ok(stream) => {
+			log::debug!("Successfully created OpenAI stream");
+			stream
+		},
+		Err(e) => {
+			let error_msg = e.to_string();
+			if error_msg.contains("insufficient_quota")
+				|| error_msg.contains("exceeded your current quota")
+			{
+				log::error!("OpenAI API quota exceeded. Please check your billing at https://platform.openai.com/account/billing");
+				return Err(e);
+			} else if error_msg.contains("invalid_api_key")
+				|| error_msg.contains("Incorrect API key")
+			{
+				log::error!("Invalid OpenAI API key. Please check your API key at https://platform.openai.com/account/api-keys");
+				return Err(e);
+			} else {
+				log::error!("Failed to create OpenAI stream: {}", e);
+				return Err(e);
+			}
+		},
+	};
 
 	// Wrapping the buffer in an Arc and Mutex
 	let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
+	let chunk_count = Arc::new(Mutex::new(0));
 
 	// Iterating over stream contents
 	stream
 		.for_each({
 			// Cloning the Arc to be moved into the outer move closure
 			let buffer = Arc::clone(&buffer);
+			let chunk_count = Arc::clone(&chunk_count);
 			move |each| {
 				// Cloning the Arc again to be moved into the async block
 				let buffer_clone = Arc::clone(&buffer);
+				let chunk_count_clone = Arc::clone(&chunk_count);
 				async move {
 					match each {
 						ResponseChunk::Content { delta, response_index: _ } => {
@@ -60,8 +91,17 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
 							// Appending delta to buffer
 							let mut locked_buffer = buffer_clone.lock().unwrap();
 							locked_buffer.push(delta);
+
+							// Track chunk count
+							let mut count = chunk_count_clone.lock().unwrap();
+							*count += 1;
 						},
-						_ => {},
+						ResponseChunk::Done => {
+							log::debug!("OpenAI stream completed");
+						},
+						_ => {
+							log::debug!("Received other response chunk type");
+						},
 					}
 				}
 			}
@@ -70,8 +110,20 @@ async fn process_message_stream(client: ChatGPT, prompt: &str) -> chatgpt::Resul
 
 	// Use buffer outside of for_each, by locking and dereferencing
 	let final_buffer = buffer.lock().unwrap();
+	let final_chunk_count = chunk_count.lock().unwrap();
+	let result = final_buffer.join("");
 
-	Ok(final_buffer.join(""))
+	log::debug!(
+		"OpenAI response complete. Chunks received: {}, Total length: {}",
+		*final_chunk_count,
+		result.len()
+	);
+
+	if result.is_empty() {
+		log::warn!("OpenAI API returned empty response despite successful connection. This may indicate quota limits or content filtering.");
+	}
+
+	Ok(result)
 }
 
 pub async fn process_long_input(
@@ -91,10 +143,10 @@ pub async fn process_long_input(
 	for chunk in chunks.iter() {
 		// create a new conversation and client instance for each chunk
 		let new_client = gpt_client.clone();
-		let mut prompt = PROMPTS[prompt].to_string();
+		let mut prompt_text = PROMPTS[prompt].to_string();
 		// append chunk to prompt
-		prompt.push_str(chunk);
-		let result = process_message_stream(new_client, &prompt).await?;
+		prompt_text.push_str(chunk);
+		let result = process_message_stream(new_client, &prompt_text).await?;
 		buffer.push_str(&result);
 	}
 
@@ -106,9 +158,9 @@ pub async fn process_short_input(
 	input: String,
 	prompt: usize,
 ) -> chatgpt::Result<String> {
-	let prompt = format!("{} {}", PROMPTS[prompt], input);
+	let prompt_text = format!("{} {}", PROMPTS[prompt], input);
 
-	let result = process_message_stream(gpt_client, &prompt).await?;
+	let result = process_message_stream(gpt_client, &prompt_text).await?;
 
 	Ok(result)
 }

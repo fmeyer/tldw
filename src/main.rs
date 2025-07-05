@@ -49,6 +49,7 @@ fn write_to_file(filename: &str, content: &str) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+	env_logger::init();
 	let args = Args::parse();
 	debug!("Debug enabled");
 	debug!("Video URL: {}", &args.video_url);
@@ -56,34 +57,98 @@ async fn main() -> Result<()> {
 
 	let api_key = env::var("OPENAI_API_KEY").expect("Missing OPENAI_API_KEY environment variable");
 
-	let status = processing::download_subtitles(&args.video_url);
+	let subtitle_result = processing::download_subtitles(&args.video_url);
 
 	let chat_engine = match args.engine {
 		4 => ChatGPTEngine::Custom("gpt-4o-2024-05-13"),
 		_ => ChatGPTEngine::Gpt4,
 	};
 
-	let gpt_client =
-		summarizer::build_chat_client(api_key, chat_engine).expect("Could not build GPT client");
+	let gpt_client = summarizer::build_chat_client(api_key.clone(), chat_engine)
+		.expect("Could not build GPT client");
 
-	let result: String = match status {
-		Ok(_v) => {
-			let input = processing::process_subtitles();
+	let result: String = match subtitle_result {
+		Ok(subtitle_file_path) => {
+			let input = processing::process_subtitles(&subtitle_file_path);
+			debug!("Subtitle processing successful. Input length: {}", input.len());
 
-			if input.len() > MAX_TOKENS {
-				summarizer::process_long_input(gpt_client, input, 2).await?
+			if input.len() == 0 {
+				debug!("WARNING: Subtitle processing returned empty content!");
+				"Error: No subtitle content was extracted from the video.".to_string()
+			} else if input.len() > MAX_TOKENS {
+				debug!(
+					"Processing long input with {} chunks",
+					(input.len() + MAX_TOKENS - 1) / MAX_TOKENS
+				);
+				match summarizer::process_long_input(gpt_client, input, 2).await {
+					Ok(result) => {
+						debug!("Long input processing complete. Result length: {}", result.len());
+						if result.is_empty() {
+							debug!("WARNING: OpenAI API returned empty result for long input!");
+							"Error: OpenAI API returned empty response. This usually indicates:\n1. API quota exceeded - check your billing at https://platform.openai.com/account/billing\n2. Invalid API key - check your API key at https://platform.openai.com/account/api-keys\n3. Content filtering - the content may have been filtered out".to_string()
+						} else {
+							result
+						}
+					},
+					Err(e) => {
+						debug!("Long input processing failed: {}", e);
+						let error_msg = e.to_string();
+						if error_msg.contains("insufficient_quota")
+							|| error_msg.contains("exceeded your current quota")
+						{
+							format!("Error: OpenAI API quota exceeded. Please check your billing and add credits at https://platform.openai.com/account/billing")
+						} else if error_msg.contains("invalid_api_key")
+							|| error_msg.contains("Incorrect API key")
+						{
+							format!("Error: Invalid OpenAI API key. Please check your API key at https://platform.openai.com/account/api-keys")
+						} else {
+							format!("Error processing long input: {}", e)
+						}
+					},
+				}
 			} else {
-				summarizer::process_short_input(gpt_client, input, args.prompt).await?
+				debug!("Processing short input");
+				match summarizer::process_short_input(gpt_client, input, args.prompt).await {
+					Ok(result) => {
+						debug!("Short input processing complete. Result length: {}", result.len());
+						if result.is_empty() {
+							debug!("WARNING: OpenAI API returned empty result for short input!");
+							"Error: OpenAI API returned empty response. This usually indicates:\n1. API quota exceeded - check your billing at https://platform.openai.com/account/billing\n2. Invalid API key - check your API key at https://platform.openai.com/account/api-keys\n3. Content filtering - the content may have been filtered out".to_string()
+						} else {
+							result
+						}
+					},
+					Err(e) => {
+						debug!("Short input processing failed: {}", e);
+						let error_msg = e.to_string();
+						if error_msg.contains("insufficient_quota")
+							|| error_msg.contains("exceeded your current quota")
+						{
+							format!("Error: OpenAI API quota exceeded. Please check your billing and add credits at https://platform.openai.com/account/billing")
+						} else if error_msg.contains("invalid_api_key")
+							|| error_msg.contains("Incorrect API key")
+						{
+							format!("Error: Invalid OpenAI API key. Please check your API key at https://platform.openai.com/account/api-keys")
+						} else {
+							format!("Error processing short input: {}", e)
+						}
+					},
+				}
 			}
 		},
 		Err(e) => {
-			format!("yt-dlp command failed with status: {}", e)
+			debug!("Subtitle download failed: {}", e);
+			format!("yt-dlp command failed: {}", e)
 		},
 	};
 
 	let video_id = extract_video_id(&args.video_url);
 	let filename = generate_filename(video_id.unwrap());
+	debug!("Writing result to file: {}", filename);
+	debug!("Final result length: {}", result.len());
+	debug!("Result preview (first 200 chars): {}", result.chars().take(200).collect::<String>());
 	write_to_file(&filename, &result).expect("Failed to write to the file");
+	debug!("File written successfully");
 
 	Ok(())
 }
